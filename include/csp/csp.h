@@ -481,9 +481,30 @@ void csp_buffer_print_table(void);
 void csp_hex_dump(const char *desc, void *addr, int len);
 
 /**
-   Set platform specific memory copy function.
+   Handler for CMP PEEK requests: copy \a len bytes from memory at \a addr
+   into the reply buffer \a data. Return #CSP_ERR_NONE on success or a
+   negative CSP error code; the value is returned to the remote.
 */
-void csp_cmp_set_memcpy(csp_memcpy_fnc_t fnc);
+typedef int (*csp_cmp_peek_fnc_t)(void *data, uint32_t addr, uint8_t len);
+
+/**
+   Handler for CMP POKE requests: write \a len bytes from \a data to memory
+   at \a addr. Return #CSP_ERR_NONE on success or a negative CSP error code;
+   the value is returned to the remote.
+*/
+typedef int (*csp_cmp_poke_fnc_t)(const void *data, uint32_t addr, uint8_t len);
+
+/**
+   Install (or clear, by passing NULL) the handler invoked for CMP PEEK.
+   With no handler installed, PEEK requests fail with #CSP_ERR_NOTSUP.
+*/
+void csp_cmp_set_peek(csp_cmp_peek_fnc_t fnc);
+
+/**
+   Install (or clear, by passing NULL) the handler invoked for CMP POKE.
+   With no handler installed, POKE requests fail with #CSP_ERR_NOTSUP.
+*/
+void csp_cmp_set_poke(csp_cmp_poke_fnc_t fnc);
 
 #ifdef __cplusplus
 }
