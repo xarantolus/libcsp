@@ -1,5 +1,10 @@
 build
 *.swp
+
+# setuptools / pip build artifacts (the new pyproject.toml + setup.py)
+*.egg-info/
+dist/
+__pycache__/
 .lock*
 .waf*
 .waf3*

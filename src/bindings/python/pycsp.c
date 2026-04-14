@@ -799,10 +799,17 @@ static PyObject* pycsp_zmqhub_init(PyObject *self, PyObject *args) {
         return NULL; // TypeError is thrown
     }
 
+#if CSP_HAVE_LIBZMQ
     int res = csp_zmqhub_init(addr, host, 0, NULL);
     if (res != CSP_ERR_NONE) {
         return PyErr_Error("csp_zmqhub_init()", res);
     }
+#else
+    (void)addr; (void)host;
+    PyErr_SetString(PyExc_NotImplementedError,
+                    "libcsp built without ZMQ support");
+    return NULL;
+#endif
 
     Py_RETURN_NONE;
 }
@@ -832,11 +839,18 @@ static PyObject* pycsp_kiss_init(PyObject *self, PyObject *args) {
         return NULL; // TypeError is thrown
     }
 
+#if CSP_HAVE_USART
     csp_usart_conf_t conf = {.device = device, .baudrate = baudrate};
     int res = csp_usart_open_and_add_kiss_interface(&conf, if_name, NULL);
     if (res != CSP_ERR_NONE) {
         return PyErr_Error("csp_usart_open_and_add_kiss_interface()", res);
     }
+#else
+    (void)device; (void)baudrate; (void)mtu; (void)if_name;
+    PyErr_SetString(PyExc_NotImplementedError,
+                    "libcsp built without USART/KISS support");
+    return NULL;
+#endif
 
     Py_RETURN_NONE;
 }
