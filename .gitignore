@@ -1,3 +1,12 @@
+
+# Python binding build artefacts
+build/
+dist/
+wheelhouse/
+libcsp_py3.egg-info/
+src/libcsp_py3.egg-info/
+*.egg-info/
+__pycache__/
 build
 *.swp
 .lock*
