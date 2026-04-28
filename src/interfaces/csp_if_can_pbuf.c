@@ -18,15 +18,15 @@ void csp_can_pbuf_free(csp_can_interface_data_t * ifdata, csp_packet_t * buffer,
 	csp_packet_t * prev = NULL;
 
 	while (packet) {
+		csp_packet_t * next = packet->next;
 
 		/* Perform cleanup in used pbufs */
 		if (packet == buffer) {
-
 			/* Erase from list prev->next = next */
 			if (prev) {
-				prev->next = packet->next;
+				prev->next = next;
 			} else {
-				ifdata->pbufs = packet->next;
+				ifdata->pbufs = next;
 			}
 
 			if (buf_free) {
@@ -36,13 +36,12 @@ void csp_can_pbuf_free(csp_can_interface_data_t * ifdata, csp_packet_t * buffer,
 					csp_buffer_free_isr(packet);
 				}
 			}
-
+		} else {
+			prev = packet;
 		}
 
-		prev = packet;
-		packet = packet->next;
+		packet = next;
 	}
-
 }
 
 csp_packet_t * csp_can_pbuf_new(csp_can_interface_data_t * ifdata, uint32_t id, int * task_woken) {
@@ -72,15 +71,16 @@ void csp_can_pbuf_cleanup(csp_can_interface_data_t * ifdata, int * task_woken) {
 	csp_packet_t * prev = NULL;
 
 	while (packet) {
+		csp_packet_t * next = packet->next;
 
 		/* Perform cleanup in used pbufs */
 		if (now - packet->last_used > PBUF_TIMEOUT_MS) {
 
 			/* Erase from list prev->next = next */
 			if (prev) {
-				prev->next = packet->next;
+				prev->next = next;
 			} else {
-				ifdata->pbufs = packet->next;
+				ifdata->pbufs = next;
 			}
 
 			if (task_woken == NULL) {
@@ -88,13 +88,12 @@ void csp_can_pbuf_cleanup(csp_can_interface_data_t * ifdata, int * task_woken) {
 			} else {
 				csp_buffer_free_isr(packet);
 			}
-
+		} else {
+			prev = packet;
 		}
 
-		prev = packet;
-		packet = packet->next;
+		packet = next;
 	}
-
 }
 
 csp_packet_t * csp_can_pbuf_find(csp_can_interface_data_t * ifdata, uint32_t id, uint32_t mask, int * task_woken) {
