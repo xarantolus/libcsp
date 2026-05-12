@@ -706,6 +706,24 @@ static PyObject * pycsp_promisc_read(PyObject * self, PyObject * args) {
 	return PyCapsule_New(packet, PACKET_CAPSULE, pycsp_free_csp_buffer);
 }
 
+/* Pack `packet->id` back into the on-wire 32-bit CSP1 identifier.
+   Passive observers (promisc) only see the parsed `csp_id_t` once the
+   router has stripped the frame header — there's no `id_raw` field to
+   read back, and exposing six separate getters bloats the binding for
+   no good reason. Bit layout matches `csp_id1_prepend` in csp_id.c:
+   pri[2] | src[5] | dst[5] | dport[6] | sport[6] | flags[8]. */
+static PyObject * pycsp_packet_get_id(PyObject * self, PyObject * capsule) {
+	csp_packet_t * p = get_obj_as_packet(capsule, false);
+	if (p == NULL) return NULL;
+	uint32_t id = (((uint32_t)(p->id.pri)   & 0x03U) << 30)
+	            | (((uint32_t)(p->id.src)   & 0x1FU) << 25)
+	            | (((uint32_t)(p->id.dst)   & 0x1FU) << 20)
+	            | (((uint32_t)(p->id.dport) & 0x3FU) << 14)
+	            | (((uint32_t)(p->id.sport) & 0x3FU) << 8)
+	            | (((uint32_t)(p->id.flags) & 0xFFU));
+	return PyLong_FromUnsignedLong(id);
+}
+
 static PyObject * pycsp_cmp_ident(PyObject * self, PyObject * args) {
 	uint16_t node;
 	uint32_t timeout = 1000;
@@ -1046,6 +1064,10 @@ static PyMethodDef methods[] = {
 	{"promisc_enable", pycsp_promisc_enable, METH_VARARGS, ""},
 	{"promisc_disable", pycsp_promisc_disable, METH_NOARGS, ""},
 	{"promisc_read", pycsp_promisc_read, METH_VARARGS, ""},
+
+	/* csp_id_t accessor — single packed-id getter; callers parse out
+	   src/dst/sport/dport/prio/flags themselves. */
+	{"packet_get_id", pycsp_packet_get_id, METH_O, ""},
 
 	/* csp/csp_cmp.h */
 	{"cmp_ident", pycsp_cmp_ident, METH_VARARGS, ""},
