@@ -4,6 +4,7 @@
 
 #include <csp/csp.h>
 #include <csp/csp_cmp.h>
+#include <csp/csp_promisc.h>
 #include <csp/interfaces/csp_if_zmqhub.h>
 #include <csp/interfaces/csp_if_kiss.h>
 #include <csp/drivers/usart.h>
@@ -671,6 +672,40 @@ static PyObject * pycsp_buffer_remaining(PyObject * self, PyObject * args) {
 	return Py_BuildValue("i", csp_buffer_remaining());
 }
 
+static PyObject * pycsp_promisc_enable(PyObject * self, PyObject * args) {
+	unsigned int queue_size;
+	if (!PyArg_ParseTuple(args, "I", &queue_size)) {
+		return NULL;
+	}
+	int res = csp_promisc_enable(queue_size);
+	if (res != CSP_ERR_NONE) {
+		return PyErr_Error("csp_promisc_enable()", res);
+	}
+	Py_RETURN_NONE;
+}
+
+static PyObject * pycsp_promisc_disable(PyObject * self, PyObject * args) {
+	(void)self;
+	(void)args;
+	csp_promisc_disable();
+	Py_RETURN_NONE;
+}
+
+static PyObject * pycsp_promisc_read(PyObject * self, PyObject * args) {
+	uint32_t timeout = CSP_MAX_TIMEOUT;
+	if (!PyArg_ParseTuple(args, "|I", &timeout)) {
+		return NULL;
+	}
+	csp_packet_t * packet;
+	Py_BEGIN_ALLOW_THREADS;
+	packet = csp_promisc_read(timeout);
+	Py_END_ALLOW_THREADS;
+	if (packet == NULL) {
+		Py_RETURN_NONE;
+	}
+	return PyCapsule_New(packet, PACKET_CAPSULE, pycsp_free_csp_buffer);
+}
+
 static PyObject * pycsp_cmp_ident(PyObject * self, PyObject * args) {
 	uint16_t node;
 	uint32_t timeout = 1000;
@@ -1006,6 +1041,11 @@ static PyMethodDef methods[] = {
 	{"buffer_free", pycsp_buffer_free, METH_VARARGS, ""},
 	{"buffer_get", pycsp_buffer_get, METH_VARARGS, ""},
 	{"buffer_remaining", pycsp_buffer_remaining, METH_NOARGS, ""},
+
+	/* csp/csp_promisc.h */
+	{"promisc_enable", pycsp_promisc_enable, METH_VARARGS, ""},
+	{"promisc_disable", pycsp_promisc_disable, METH_NOARGS, ""},
+	{"promisc_read", pycsp_promisc_read, METH_VARARGS, ""},
 
 	/* csp/csp_cmp.h */
 	{"cmp_ident", pycsp_cmp_ident, METH_VARARGS, ""},
