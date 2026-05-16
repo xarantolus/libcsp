@@ -193,6 +193,7 @@ typedef struct {
 	uint32_t cfp_packet_counter; /**< CFP Identification number - same number on all fragments from same CSP packet. */
 	csp_can_driver_tx_t tx_func; /**< Tx function */
 	csp_packet_t * pbufs; /**< PBUF queue */
+	uint64_t pending_rx_timestamp; /**< Set via csp_can_rx_set_timestamp(); copied onto csp_packet_t.timestamp_rx at the BEGIN fragment so a packet carries its first frame's timestamp. Opaque/0 by default. */
 } csp_can_interface_data_t;
 
 /**
@@ -241,6 +242,17 @@ int csp_can_tx(csp_iface_t * iface, uint16_t via, csp_packet_t *packet);
  * @return #CSP_ERR_NONE on success, otherwise an error code.
  */
 int csp_can_rx(csp_iface_t * iface, uint32_t id, const uint8_t * data, uint8_t dlc, int *pxTaskWoken);
+
+/**
+ * Set the RX timestamp for the next csp_can_rx() frame. Applied to the
+ * packet only on a BEGIN fragment, so a reassembled packet keeps its
+ * first frame's timestamp. Opaque value: caller defines epoch/units.
+ *
+ * @param[in] iface CAN interface (interface_data must be a valid
+ *                   #csp_can_interface_data_t).
+ * @param[in] timestamp driver-supplied receive timestamp.
+ */
+void csp_can_rx_set_timestamp(csp_iface_t * iface, uint64_t timestamp);
 
 #ifdef __cplusplus
 }

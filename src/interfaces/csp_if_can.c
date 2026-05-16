@@ -73,6 +73,9 @@ static int csp_can1_rx(csp_iface_t * iface, uint32_t id, const uint8_t * data, u
 
 			csp_id_setup_rx(packet);
 
+			/* BEGIN only: keep the first frame's timestamp. */
+			packet->timestamp_rx = ifdata->pending_rx_timestamp;
+
 			/* Copy CSP identifier (header) */
 			memcpy(packet->frame_begin, data, sizeof(uint32_t));
 			packet->frame_length += sizeof(uint32_t);
@@ -280,6 +283,9 @@ static int csp_can2_rx(csp_iface_t * iface, uint32_t id, const uint8_t * data, u
 		}
 
 		csp_id_setup_rx(packet);
+
+		/* BEGIN only: keep the first frame's timestamp. */
+		packet->timestamp_rx = ifdata->pending_rx_timestamp;
 
 		/* Copy first 2 bytes from CFP 2.0 header:
 		 * Because the id field has already been converted in memory to a 32-bit
@@ -494,4 +500,9 @@ int csp_can_rx(csp_iface_t * iface, uint32_t id, const uint8_t * data, uint8_t d
 	} else {
 		return csp_can2_rx(iface, id, data, dlc, task_woken);
 	}
+}
+
+void csp_can_rx_set_timestamp(csp_iface_t * iface, uint64_t timestamp) {
+	csp_can_interface_data_t * ifdata = iface->interface_data;
+	ifdata->pending_rx_timestamp = timestamp;
 }
