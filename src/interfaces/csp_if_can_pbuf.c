@@ -50,7 +50,15 @@ csp_packet_t * csp_can_pbuf_new(csp_can_interface_data_t * ifdata, uint32_t id, 
 
 	uint32_t now = (task_woken) ? csp_get_ms_isr() : csp_get_ms();
 
-	csp_packet_t * packet = (task_woken) ? csp_buffer_get_always_isr() : csp_buffer_get_always();
+	/* Reassembly is allowed to fail when buffers are sparse: a flaky or erroring
+	 * bus emits BEGIN frames that never complete, and the reserve-bypassing
+	 * allocator (csp_buffer_get_always) would let those partial reassemblies
+	 * drain the pool to zero — starving the rest of the stack. Use the
+	 * reserve-respecting allocator and drop the frame when memory is tight. */
+	csp_packet_t * packet = (task_woken) ? csp_buffer_get_isr(0) : csp_buffer_get(0);
+	if (packet == NULL) {
+		return NULL;
+	}
 
 	packet->last_used = now;
 	packet->cfpid = id;
