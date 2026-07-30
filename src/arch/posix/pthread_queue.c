@@ -13,8 +13,18 @@ http://code.google.com/p/c-pthread-queue/
 
 #include <csp/csp.h>
 
+/* macOS condvars can't be bound to CLOCK_MONOTONIC (there is no
+ * pthread_condattr_setclock), so waits are timed against the default
+ * CLOCK_REALTIME there — same behavior, minus immunity to wall-clock jumps
+ * mid-wait. Linux is untouched. */
+#if defined(__APPLE__)
+#define PTHREAD_QUEUE_CLOCK CLOCK_REALTIME
+#else
+#define PTHREAD_QUEUE_CLOCK CLOCK_MONOTONIC
+#endif
+
 static inline int get_deadline(struct timespec * ts, uint32_t timeout_ms) {
-	int ret = clock_gettime(CLOCK_MONOTONIC, ts);
+	int ret = clock_gettime(PTHREAD_QUEUE_CLOCK, ts);
 
 	if (ret < 0) {
 		return ret;
@@ -40,7 +50,11 @@ static inline int init_cond_clock_monotonic(pthread_cond_t * cond) {
 	pthread_condattr_t attr;
 
 	pthread_condattr_init(&attr);
+#if defined(__APPLE__)
+	ret = 0; /* default clock (realtime); see PTHREAD_QUEUE_CLOCK above */
+#else
 	ret = pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+#endif
 
 	if (ret == 0) {
 		ret = pthread_cond_init(cond, &attr);
