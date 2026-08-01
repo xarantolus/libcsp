@@ -44,7 +44,7 @@ option(CSP_FIXUP_V1_ZMQ_LITTLE_ENDIAN "Use little-endian CSP ID for ZMQ with CSP
 
 option(CSP_ENABLE_KISS_CRC "Enables the extra CRC in the KISS interface (legacy)" ON)
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   set(CSP_POSIX 1)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "CYGWIN")
   set(CSP_POSIX 1)
@@ -60,7 +60,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Generic")
   endif()
 endif()
 
-if(CSP_POSIX AND CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+if(CSP_POSIX AND (CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin"))
 
   include(CheckIncludeFiles)
   check_include_files(sys/socket.h HAVE_SYS_SOCKET_H)
