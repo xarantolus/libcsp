@@ -126,7 +126,7 @@ if(CSP_POSIX)
     -Wpointer-arith
     -Wshadow
     -Wwrite-strings
-    $<$<C_COMPILER_ID:Clang>:-Wno-gnu-zero-variadic-macro-arguments>)
+    $<$<OR:$<C_COMPILER_ID:Clang>,$<C_COMPILER_ID:AppleClang>>:-Wno-gnu-zero-variadic-macro-arguments>)
 endif()
 target_link_libraries(csp PRIVATE csp_common)
 

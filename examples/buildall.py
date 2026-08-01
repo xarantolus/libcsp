@@ -35,6 +35,7 @@ def build_with_cmake():
 
 
 def build_with_waf():
+    import sys
 
     options = [
         '--with-os=posix',
@@ -50,6 +51,9 @@ def build_with_waf():
         '--enable-examples',
         '--enable-yaml',
     ]
+
+    if sys.platform == 'darwin':
+        options = [opt for opt in options if 'can-socketcan' not in opt]
 
     subprocess.check_call(['./waf', 'distclean', 'configure', 'build'])
     subprocess.check_call(['./waf', 'distclean', 'configure', 'build'] + options)

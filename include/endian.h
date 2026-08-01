@@ -1,12 +1,14 @@
-#ifndef _CSP_ENDIAN_H
-#define _CSP_ENDIAN_H
+/* <endian.h> is glibc/musl-only, so libcsp sources including it don't compile
+ * on macOS. This shim sits on the build's `-I src` include path: on macOS it
+ * maps the glibc byte-order macros onto libkern's, everywhere else it defers
+ * to the real system header via #include_next, so Linux builds see the exact
+ * same header they always did. */
+#pragma once
 
-#pragma GCC system_header
+#if defined(__APPLE__)
 
-#ifdef __APPLE__
-
-#include <machine/endian.h>
 #include <libkern/OSByteOrder.h>
+#include <machine/endian.h>
 
 #define htobe16(x) OSSwapHostToBigInt16(x)
 #define htole16(x) OSSwapHostToLittleInt16(x)
@@ -23,10 +25,15 @@
 #define be64toh(x) OSSwapBigToHostInt64(x)
 #define le64toh(x) OSSwapLittleToHostInt64(x)
 
-#else
+#ifndef __BYTE_ORDER
+#define __BYTE_ORDER BYTE_ORDER
+#define __BIG_ENDIAN BIG_ENDIAN
+#define __LITTLE_ENDIAN LITTLE_ENDIAN
+#endif
 
+#else /* !__APPLE__ */
+
+#pragma GCC system_header
 #include_next <endian.h>
 
 #endif
-
-#endif /* _CSP_ENDIAN_H */

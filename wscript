@@ -91,7 +91,7 @@ def configure(ctx):
                                          "-Wpointer-arith",
                                          "-Wshadow",
                                          "-Wwrite-strings"])
-        if ctx.env.CC_NAME == 'clang':
+        if ctx.env.CC_NAME == 'clang' or ctx.env.DEST_OS == 'darwin':
             ctx.env.append_value('CFLAGS', ["-Wno-gnu-zero-variadic-macro-arguments"])
 
     # Setup default include path and any extra defined
