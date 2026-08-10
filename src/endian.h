@@ -5,6 +5,10 @@
  * same header they always did. */
 #pragma once
 
+/* #include_next below is a compiler extension, and this header shadows the
+ * system one on every platform, so exempt it from -pedantic diagnostics. */
+#pragma GCC system_header
+
 #if defined(__APPLE__)
 
 #include <libkern/OSByteOrder.h>
