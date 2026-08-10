@@ -52,7 +52,18 @@ typedef struct __packed {
 #define RDP_SYN_OPTIONS_SIZE (6 * sizeof(uint32_t))
 
 
+
 static int csp_rdp_close_internal(csp_conn_t * conn, uint8_t closed_by, bool send_rst);
+
+static uint32_t csp_rdp_clamp(uint32_t value, uint32_t min, uint32_t max) {
+	if (value < min) {
+		return min;
+	}
+	if (value > max) {
+		return max;
+	}
+	return value;
+}
 
 /**
  * RDP Headers:
@@ -535,13 +546,17 @@ bool csp_rdp_new_packet(csp_conn_t * conn, csp_packet_t * packet) {
 				goto discard_close;
 			}
 
-			/* Store RDP options */
-			conn->rdp.window_size = be32toh(packet->data32[0]);
-			conn->rdp.conn_timeout = be32toh(packet->data32[1]);
-			conn->rdp.packet_timeout = be32toh(packet->data32[2]);
-			conn->rdp.delayed_acks = be32toh(packet->data32[3]);
-			conn->rdp.ack_timeout = be32toh(packet->data32[4]);
-			conn->rdp.ack_delay_count = be32toh(packet->data32[5]);
+			/* Store RDP options. These are unauthenticated input, so every
+			   field is bounded before it reaches the connection state. */
+			conn->rdp.window_size = csp_rdp_clamp(be32toh(packet->data32[0]), 1, CSP_RDP_MAX_WINDOW);
+			conn->rdp.conn_timeout = csp_rdp_clamp(be32toh(packet->data32[1]),
+												   CSP_RDP_MIN_CONN_TIMEOUT, CSP_RDP_MAX_CONN_TIMEOUT);
+			conn->rdp.packet_timeout = csp_rdp_clamp(be32toh(packet->data32[2]),
+													 CSP_RDP_MIN_PACKET_TIMEOUT, CSP_RDP_MAX_PACKET_TIMEOUT);
+			conn->rdp.delayed_acks = (be32toh(packet->data32[3]) != 0);
+			conn->rdp.ack_timeout = csp_rdp_clamp(be32toh(packet->data32[4]),
+												  CSP_RDP_MIN_ACK_TIMEOUT, conn->rdp.conn_timeout);
+			conn->rdp.ack_delay_count = csp_rdp_clamp(be32toh(packet->data32[5]), 1, conn->rdp.window_size);
 			csp_rdp_protocol("RDP %p: window size %" PRIu32 ", conn timeout %" PRIu32 ", packet timeout %" PRIu32 ", delayed acks: %" PRIu32 ", ack timeout %" PRIu32 ", ack each %" PRIu32 " packet\n",
 							 (void *)conn, conn->rdp.window_size, conn->rdp.conn_timeout, conn->rdp.packet_timeout,
 							 conn->rdp.delayed_acks, conn->rdp.ack_timeout, conn->rdp.ack_delay_count);

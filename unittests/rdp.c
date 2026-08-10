@@ -130,6 +130,85 @@ START_TEST(test_rdp_syn_with_partial_options_is_rejected)
 }
 END_TEST
 
+START_TEST(test_rdp_syn_options_are_bounded_above)
+{
+	setup_stack();
+
+	const uint32_t hostile[6] = {
+		0xFFFFFFFF, /* window size     */
+		0xFFFFFFFF, /* conn timeout    */
+		0,          /* packet timeout  */
+		0xFFFFFFFF, /* delayed acks    */
+		0xFFFFFFFF, /* ack timeout     */
+		0xFFFFFFFF, /* ack delay count */
+	};
+	send_syn(hostile);
+
+	const csp_conn_t * conn = find_rdp_conn();
+	ck_assert_ptr_nonnull(conn);
+
+	ck_assert_uint_le(conn->rdp.window_size, CSP_RDP_MAX_WINDOW);
+	ck_assert_uint_le(conn->rdp.conn_timeout, CSP_RDP_MAX_CONN_TIMEOUT);
+	ck_assert_uint_le(conn->rdp.packet_timeout, CSP_RDP_MAX_PACKET_TIMEOUT);
+	ck_assert_uint_ge(conn->rdp.packet_timeout, CSP_RDP_MIN_PACKET_TIMEOUT);
+	ck_assert_uint_le(conn->rdp.ack_delay_count, conn->rdp.window_size);
+	ck_assert_uint_le(conn->rdp.ack_timeout, conn->rdp.conn_timeout);
+}
+END_TEST
+
+START_TEST(test_rdp_syn_options_are_bounded_below)
+{
+	setup_stack();
+
+	/* Zero is as damaging as a huge value: a zero window stalls the sequence
+	   arithmetic, and a zero timeout means retransmit as fast as the router runs. */
+	const uint32_t zeroes[6] = { 0, 0, 0, 0, 0, 0 };
+	send_syn(zeroes);
+
+	const csp_conn_t * conn = find_rdp_conn();
+	ck_assert_ptr_nonnull(conn);
+
+	ck_assert_uint_ge(conn->rdp.window_size, 1);
+	ck_assert_uint_ge(conn->rdp.conn_timeout, CSP_RDP_MIN_CONN_TIMEOUT);
+	ck_assert_uint_ge(conn->rdp.packet_timeout, CSP_RDP_MIN_PACKET_TIMEOUT);
+	ck_assert_uint_ge(conn->rdp.ack_timeout, CSP_RDP_MIN_ACK_TIMEOUT);
+	ck_assert_uint_ge(conn->rdp.ack_delay_count, 1);
+}
+END_TEST
+
+START_TEST(test_rdp_syn_keeps_valid_options)
+{
+	setup_stack();
+
+	const uint32_t valid[6] = { 3, 20000, 500, 1, 250, 2 };
+	send_syn(valid);
+
+	const csp_conn_t * conn = find_rdp_conn();
+	ck_assert_ptr_nonnull(conn);
+
+	ck_assert_uint_eq(conn->rdp.window_size, 3);
+	ck_assert_uint_eq(conn->rdp.conn_timeout, 20000);
+	ck_assert_uint_eq(conn->rdp.packet_timeout, 500);
+	ck_assert_uint_eq(conn->rdp.delayed_acks, 1);
+	ck_assert_uint_eq(conn->rdp.ack_timeout, 250);
+	ck_assert_uint_eq(conn->rdp.ack_delay_count, 2);
+}
+END_TEST
+
+START_TEST(test_rdp_delayed_acks_is_a_flag)
+{
+	setup_stack();
+
+	/* Any non-zero value means "on"; it is not a count. */
+	const uint32_t opts[6] = { 3, 20000, 500, 2, 250, 2 };
+	send_syn(opts);
+
+	const csp_conn_t * conn = find_rdp_conn();
+	ck_assert_ptr_nonnull(conn);
+	ck_assert_uint_eq(conn->rdp.delayed_acks, 1);
+}
+END_TEST
+
 Suite * rdp_suite(void)
 {
 	Suite * s;
@@ -140,6 +219,10 @@ Suite * rdp_suite(void)
 	tc_syn = tcase_create("syn");
 	tcase_add_test(tc_syn, test_rdp_syn_without_options_is_rejected);
 	tcase_add_test(tc_syn, test_rdp_syn_with_partial_options_is_rejected);
+	tcase_add_test(tc_syn, test_rdp_syn_options_are_bounded_above);
+	tcase_add_test(tc_syn, test_rdp_syn_options_are_bounded_below);
+	tcase_add_test(tc_syn, test_rdp_syn_keeps_valid_options);
+	tcase_add_test(tc_syn, test_rdp_delayed_acks_is_a_flag);
 	suite_add_tcase(s, tc_syn);
 
 	return s;
