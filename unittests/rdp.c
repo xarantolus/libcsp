@@ -7,9 +7,11 @@
 #include "../include/csp/csp_id.h"
 #include "../include/csp/csp_iflist.h"
 #include "../include/csp/csp_interface.h"
+#include "../include/csp/csp_buffer.h"
 
 #include "../src/csp_conn.h"
 #include "../src/csp_rdp.h"
+#include "../src/csp_rdp_queue.h"
 
 #define RDP_SYN 0x08
 #define RDP_ACK 0x04
@@ -272,11 +274,57 @@ START_TEST(test_rdp_retransmit_count_resets_on_ack)
 }
 END_TEST
 
+START_TEST(test_rdp_queue_flush_all_releases_buffers)
+{
+	setup_stack();
+
+	const int free_before = csp_buffer_remaining();
+
+	/* A half-open connection leaves its SYN/ACK on the RDP transmit queue. */
+	const uint32_t opts[6] = { 4, 10000, 1000, 1, 250, 2 };
+	send_syn(opts);
+	ck_assert_ptr_nonnull(find_rdp_conn());
+	ck_assert_int_lt(csp_buffer_remaining(), free_before);
+
+	csp_rdp_queue_flush(NULL);
+
+	ck_assert_int_eq(csp_buffer_remaining(), free_before);
+}
+END_TEST
+
+START_TEST(test_rdp_queue_flush_all_releases_receive_buffers)
+{
+	setup_stack();
+
+	const int free_before = csp_buffer_remaining();
+
+	const uint32_t opts[6] = { 4, 10000, 1000, 1, 250, 2 };
+	send_syn(opts);
+	const csp_conn_t * conn = find_rdp_conn();
+	ck_assert_ptr_nonnull(conn);
+	const uint16_t iss = conn->rdp.snd_iss;
+	ack_handshake(iss);
+
+	/* Data ahead of the next expected sequence number is held on the RDP
+	   receive queue until the gap is filled. */
+	csp_packet_t * packet = new_rdp_packet();
+	memcpy(packet->data, "payload", 7);
+	packet->length = 7;
+	put_header_and_route(packet, RDP_ACK, 1005, iss);
+	ck_assert_int_lt(csp_buffer_remaining(), free_before);
+
+	csp_rdp_queue_flush(NULL);
+
+	ck_assert_int_eq(csp_buffer_remaining(), free_before);
+}
+END_TEST
+
 Suite * rdp_suite(void)
 {
 	Suite * s;
 	TCase * tc_syn;
 	TCase * tc_tx;
+	TCase * tc_queue;
 
 	s = suite_create("RDP");
 
@@ -296,6 +344,11 @@ Suite * rdp_suite(void)
 	tcase_add_test(tc_tx, test_rdp_retransmits_are_limited);
 	tcase_add_test(tc_tx, test_rdp_retransmit_count_resets_on_ack);
 	suite_add_tcase(s, tc_tx);
+
+	tc_queue = tcase_create("queue");
+	tcase_add_test(tc_queue, test_rdp_queue_flush_all_releases_buffers);
+	tcase_add_test(tc_queue, test_rdp_queue_flush_all_releases_receive_buffers);
+	suite_add_tcase(s, tc_queue);
 
 	return s;
 }

@@ -34,6 +34,26 @@ static int __csp_rdp_queue_flush(csp_queue_handle_t queue, csp_conn_t * conn) {
 	return ret;
 }
 
+static int __csp_rdp_queue_flush_all(csp_queue_handle_t queue) {
+
+	int ret = CSP_ERR_NONE;
+	int size;
+
+	size = csp_queue_size(queue);
+	while (size--) {
+		csp_packet_t * packet;
+
+		ret = csp_queue_dequeue(queue, &packet, 0);
+		if (ret != CSP_QUEUE_OK) {
+			break;
+		}
+
+		csp_buffer_free(packet);
+	}
+
+	return ret;
+}
+
 static void csp_rdp_queue_add(csp_queue_handle_t queue, csp_conn_t * conn, csp_packet_t * packet) {
     packet->conn = conn;
     if (csp_queue_enqueue(queue, &packet, 0) != CSP_QUEUE_OK) {
@@ -84,8 +104,10 @@ void csp_rdp_queue_init(void) {
 void csp_rdp_queue_flush(csp_conn_t * conn) {
 
 	if (conn == NULL) {
-		csp_queue_empty(tx_queue);
-		csp_queue_empty(rx_queue);
+		/* csp_queue_empty() discards the queued pointers, so the packets
+		   behind them have to be released here. */
+		(void)__csp_rdp_queue_flush_all(tx_queue);
+		(void)__csp_rdp_queue_flush_all(rx_queue);
 	} else {
 		(void)__csp_rdp_queue_flush(tx_queue, conn);
 		(void)__csp_rdp_queue_flush(rx_queue, conn);
