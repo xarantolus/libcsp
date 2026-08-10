@@ -48,6 +48,9 @@ typedef struct __packed {
 	uint16_t ack_nr;
 } rdp_header_t;
 
+/* Size of the option block a SYN carries ahead of the RDP header */
+#define RDP_SYN_OPTIONS_SIZE (6 * sizeof(uint32_t))
+
 
 static int csp_rdp_close_internal(csp_conn_t * conn, uint8_t closed_by, bool send_rst);
 
@@ -523,6 +526,14 @@ bool csp_rdp_new_packet(csp_conn_t * conn, csp_packet_t * packet) {
 			conn->rdp.rcv_cur = rx_header->seq_nr;
 			conn->rdp.rcv_irs = rx_header->seq_nr;
 			conn->rdp.rcv_lsa = rx_header->seq_nr;
+
+			/* The option block below is read from the packet, so a SYN that
+			   does not carry a complete one cannot be honoured. */
+			if (packet->length < (RDP_SYN_OPTIONS_SIZE + sizeof(rdp_header_t))) {
+				csp_rdp_error("RDP %p: SYN without a complete option block\n", (void *)conn);
+				csp_rdp_send_cmp(conn, NULL, RDP_RST, conn->rdp.snd_nxt, conn->rdp.rcv_cur);
+				goto discard_close;
+			}
 
 			/* Store RDP options */
 			conn->rdp.window_size = be32toh(packet->data32[0]);
