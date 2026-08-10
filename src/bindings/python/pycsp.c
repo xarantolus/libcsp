@@ -864,6 +864,8 @@ static PyObject * pycsp_packet_get_id(PyObject * self, PyObject * capsule) {
 	            | (((uint32_t)(p->id.sport) & 0x3FU) << 8)
 	            | (((uint32_t)(p->id.flags) & 0xFFU));
 	return PyLong_FromUnsignedLong(id);
+}
+
 static PyObject * pycsp_id_prepend(PyObject * self, PyObject * packet_capsule) {
 	csp_packet_t * packet = get_obj_as_packet(packet_capsule, false);
 	if (packet == NULL) {
