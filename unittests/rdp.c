@@ -9,6 +9,10 @@
 #include "../include/csp/csp_interface.h"
 #include "../include/csp/csp_buffer.h"
 
+#include "csp/autoconfig.h"
+
+#if (CSP_USE_RDP)
+
 #include "../src/csp_conn.h"
 #include "../src/csp_rdp.h"
 #include "../src/csp_rdp_queue.h"
@@ -352,3 +356,12 @@ Suite * rdp_suite(void)
 
 	return s;
 }
+
+#else /* !CSP_USE_RDP */
+
+Suite * rdp_suite(void)
+{
+	return suite_create("RDP");
+}
+
+#endif
