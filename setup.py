@@ -85,6 +85,14 @@ sources = [
     "src/csp_qfifo.c",
     "src/csp_route.c",
     "src/csp_service_handler.c",
+    # CMP request handlers, split out of csp_service_handler.c upstream
+    "src/cmp/csp_cmp_clock.c",
+    "src/cmp/csp_cmp_dispatch.c",
+    "src/cmp/csp_cmp_ident.c",
+    "src/cmp/csp_cmp_if_stats.c",
+    "src/cmp/csp_cmp_mem.c",
+    "src/cmp/csp_cmp_peek_poke.c",
+    "src/cmp/csp_cmp_route.c",
     "src/csp_services.c",
     "src/csp_sfp.c",
     # CSP_ENABLE_CSP_PRINT.
