@@ -7,5 +7,6 @@ if(CHECK_FOUND)
     buffer.c
     hmac.c
     rdp.c
+    promisc.c
   )
 endif()

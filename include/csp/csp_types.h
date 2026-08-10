@@ -118,7 +118,7 @@ typedef struct {
 typedef struct csp_packet_s {
 
 	uint32_t timestamp_tx;		/*< Time the message was sent */
-	uint64_t timestamp_rx;      /*< Time received. Opaque to libcsp; CAN sets it from csp_can_rx_set_timestamp() on the first (BEGIN) fragment. */
+	uint64_t timestamp_rx;      /*< Time received. Opaque to libcsp; CAN sets it from the timestamp passed to csp_can_rx() on the last (End) fragment, CSPv2 only. */
 	struct csp_conn_s * conn;   /*< Associated connection (this is used in RDP queue) */
 
 	uint16_t rx_count;          /*< Received bytes */
