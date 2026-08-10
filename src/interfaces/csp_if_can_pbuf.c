@@ -6,6 +6,7 @@
 #include <csp/csp_error.h>
 #include <csp/arch/csp_time.h>
 #include <csp/interfaces/csp_if_can.h>
+#include <csp/csp_iflist.h>
 
 #include "../csp_buffer_private.h"
 
@@ -18,15 +19,15 @@ void csp_can_pbuf_free(csp_can_interface_data_t * ifdata, csp_packet_t * buffer,
 	csp_packet_t * prev = NULL;
 
 	while (packet) {
-		csp_packet_t * next = packet->next;
 
 		/* Perform cleanup in used pbufs */
 		if (packet == buffer) {
+
 			/* Erase from list prev->next = next */
 			if (prev) {
-				prev->next = next;
+				prev->next = packet->next;
 			} else {
-				ifdata->pbufs = next;
+				ifdata->pbufs = packet->next;
 			}
 
 			if (buf_free) {
@@ -36,28 +37,31 @@ void csp_can_pbuf_free(csp_can_interface_data_t * ifdata, csp_packet_t * buffer,
 					csp_buffer_free_isr(packet);
 				}
 			}
-		} else {
-			prev = packet;
+			return;
 		}
 
-		packet = next;
+		prev = packet;
+		packet = packet->next;
 	}
+
 }
 
-csp_packet_t * csp_can_pbuf_new(csp_can_interface_data_t * ifdata, uint32_t id, int * task_woken) {
+csp_packet_t * csp_can_pbuf_new(csp_can_interface_data_t * ifdata, uint32_t id, csp_id_t csp_id, int * task_woken) {
 
 	csp_can_pbuf_cleanup(ifdata, task_woken);
 
 	uint32_t now = (task_woken) ? csp_get_ms_isr() : csp_get_ms();
 
-	/* Reassembly is allowed to fail when buffers are sparse: a flaky or erroring
-	 * bus emits BEGIN frames that never complete, and the reserve-bypassing
-	 * allocator (csp_buffer_get_always) would let those partial reassemblies
-	 * drain the pool to zero — starving the rest of the stack. Use the
-	 * reserve-respecting allocator and drop the frame when memory is tight. */
+	/* Reassembly is allowed to fail when buffers are sparse, for packets
+	 * addressed to us as much as for any other: a flaky or erroring bus emits
+	 * BEGIN frames that never complete, and the reserve-bypassing allocator
+	 * (csp_buffer_get_always) would let those partial reassemblies drain the
+	 * pool to zero, starving the rest of the stack. Use the reserve-respecting
+	 * allocator and drop the frame when memory is tight. */
+	(void)csp_id;
 	csp_packet_t * packet = (task_woken) ? csp_buffer_get_isr(0) : csp_buffer_get(0);
 	if (packet == NULL) {
-		return NULL;
+		return packet;
 	}
 
 	packet->last_used = now;
@@ -79,6 +83,7 @@ void csp_can_pbuf_cleanup(csp_can_interface_data_t * ifdata, int * task_woken) {
 	csp_packet_t * prev = NULL;
 
 	while (packet) {
+
 		csp_packet_t * next = packet->next;
 
 		/* Perform cleanup in used pbufs */
@@ -96,12 +101,16 @@ void csp_can_pbuf_cleanup(csp_can_interface_data_t * ifdata, int * task_woken) {
 			} else {
 				csp_buffer_free_isr(packet);
 			}
-		} else {
-			prev = packet;
+
+			packet = next;
+			continue;
+
 		}
 
+		prev = packet;
 		packet = next;
 	}
+
 }
 
 csp_packet_t * csp_can_pbuf_find(csp_can_interface_data_t * ifdata, uint32_t id, uint32_t mask, int * task_woken) {

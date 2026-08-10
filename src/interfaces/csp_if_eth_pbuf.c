@@ -4,7 +4,9 @@
 
 #include <csp/csp_id.h>
 #include <csp/arch/csp_time.h>
-#include <csp/interfaces/csp_if_eth_pbuf.h>
+#include "csp_if_eth_pbuf.h"
+
+#include "../csp_buffer_private.h"
 
 /* Buffer element timeout in ms */
 #define PBUF_TIMEOUT_MS 1000
@@ -33,6 +35,7 @@ void csp_eth_pbuf_free(csp_eth_interface_data_t * ifdata, csp_packet_t * buffer,
 					csp_buffer_free_isr(packet);
 				}
 			}
+			return;
 		}
 
 		prev = packet;
@@ -41,11 +44,18 @@ void csp_eth_pbuf_free(csp_eth_interface_data_t * ifdata, csp_packet_t * buffer,
 
 }
 
-csp_packet_t * csp_eth_pbuf_new(csp_eth_interface_data_t * ifdata, uint32_t id, uint32_t now, int * task_woken) {
+csp_packet_t * csp_eth_pbuf_new(csp_eth_interface_data_t * ifdata, uint32_t id, csp_id_t csp_id, uint32_t now, int * task_woken) {
 
 	csp_eth_pbuf_cleanup(ifdata, now, task_woken);
 
-	csp_packet_t * packet = (task_woken) ? csp_buffer_get_isr(0) : csp_buffer_get(0);
+	csp_packet_t * packet = NULL;
+	if (csp_iflist_get_by_addr(csp_id.dst) != NULL) {
+		/* The packet is for us, make sure we don't silently ignore the situation if we can't process it */
+		packet = (task_woken) ? csp_buffer_get_always_isr() : csp_buffer_get_always();
+	} else  {
+		/* The packet is not for us, it is ok to drop it if we don't have enough buffers*/
+		packet = (task_woken) ? csp_buffer_get_isr(0) : csp_buffer_get(0);
+	}
 	if (packet == NULL) {
 		return NULL;
 	}
@@ -68,14 +78,16 @@ void csp_eth_pbuf_cleanup(csp_eth_interface_data_t * ifdata, uint32_t now, int *
 
 	while (packet) {
 
+		csp_packet_t * next = packet->next;
+
 		/* Perform cleanup in used pbufs */
 		if ((now - packet->last_used) > PBUF_TIMEOUT_MS) {
 
 			/* Erase from list prev->next = next */
 			if (prev) {
-				prev->next = packet->next;
+				prev->next = next;
 			} else {
-				ifdata->pbufs = packet->next;
+				ifdata->pbufs = next;
 			}
 
 			if (task_woken == NULL) {
@@ -84,15 +96,18 @@ void csp_eth_pbuf_cleanup(csp_eth_interface_data_t * ifdata, uint32_t now, int *
 				csp_buffer_free_isr(packet);
 			}
 
+			packet = next;
+			continue;
+
 		}
 
 		prev = packet;
-		packet = packet->next;
+		packet = next;
 	}
 
 }
 
-csp_packet_t * csp_eth_pbuf_find(csp_eth_interface_data_t * ifdata, uint32_t id, int * task_woken) {
+csp_packet_t * csp_eth_pbuf_find(csp_eth_interface_data_t * ifdata, uint32_t id, csp_id_t csp_id, int * task_woken) {
 
 	uint32_t now = (task_woken) ? csp_get_ms_isr() : csp_get_ms();
 
@@ -106,6 +121,6 @@ csp_packet_t * csp_eth_pbuf_find(csp_eth_interface_data_t * ifdata, uint32_t id,
 		packet = packet->next;
 	}
 
-	return csp_eth_pbuf_new(ifdata, id, now, task_woken);
+	return csp_eth_pbuf_new(ifdata, id, csp_id, now, task_woken);
 
 }

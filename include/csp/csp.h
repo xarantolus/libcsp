@@ -475,11 +475,20 @@ void csp_rdp_get_opt(unsigned int *window_size, unsigned int *conn_timeout_ms,
 	  unsigned int *ack_timeout, unsigned int *ack_delay_count);
 
 /**
- * Set platform specific memory copy functions.
+ * Deprecated: override csp_cmp_memcpy(), csp_cmp_memread64(), or
+ * csp_cmp_memwrite64() instead.
  */
-void csp_cmp_set_memcpy(csp_memcpy_fnc_t fnc);
-void csp_cmp_set_memread64(csp_memread64_fnc_t fnc);
-void csp_cmp_set_memwrite64(csp_memwrite64_fnc_t fnc);
+#if defined(__GNUC__) || defined(__clang__)
+#define CSP_DEPRECATED(_msg) __attribute__((deprecated(_msg)))
+#else
+#define CSP_DEPRECATED(_msg)
+#endif
+
+void csp_cmp_set_memcpy(csp_memcpy_fnc_t fnc) CSP_DEPRECATED("override csp_cmp_memcpy() instead");
+void csp_cmp_set_memread64(csp_memread64_fnc_t fnc) CSP_DEPRECATED("override csp_cmp_memread64() instead");
+void csp_cmp_set_memwrite64(csp_memwrite64_fnc_t fnc) CSP_DEPRECATED("override csp_cmp_memwrite64() instead");
+
+#undef CSP_DEPRECATED
 
 #if (CSP_ENABLE_CSP_PRINT)
 
@@ -501,7 +510,12 @@ void csp_hex_dump(const char *desc, const void *addr, int len);
 #else
 
 inline void csp_conn_print_table(void) {}
-inline void csp_hex_dump(const char *desc, void *addr, int len) {}
+inline void csp_hex_dump(const char *desc, const void *addr, int len) {
+   /* Avoid compiler warnings about unused parameters when CSP_ENABLE_CSP_PRINT=0 */
+   (void)desc;
+   (void)addr;
+   (void)len;
+}
 
 #endif
 

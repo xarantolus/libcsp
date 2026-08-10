@@ -1,6 +1,6 @@
 
 #include <csp/interfaces/csp_if_eth.h>
-#include <csp/interfaces/csp_if_eth_pbuf.h>
+#include "csp_if_eth_pbuf.h"
 #include <csp/arch/csp_time.h>
 
 #include <endian.h>
@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <stdatomic.h>
 
 #include <csp/csp.h>
 #include <csp/csp_id.h>
@@ -20,7 +21,7 @@
  */
 bool eth_debug = false;
 
-bool csp_eth_pack_header(csp_eth_header_t * buf, 
+bool csp_eth_pack_header(csp_eth_header_t * buf,
                             uint16_t packet_id, uint16_t src_addr,
                             uint16_t seg_size, uint16_t packet_length) {
 
@@ -52,7 +53,7 @@ static bool csp_if_eth_unpack_header(csp_eth_header_t * buf,
 /**
  * Address resolution (ARP)
  * All received (ETH MAC, CSP src) are recorded and used to map destination address to MAC addresses,
- * used in uni-cast. Until a packet from a CSP address has been received, ETH broadcast is used to this address. 
+ * used in uni-cast. Until a packet from a CSP address has been received, ETH broadcast is used to this address.
  */
 
 #define ARP_MAX_ENTRIES 10
@@ -66,7 +67,7 @@ typedef struct arp_list_entry_s {
 static arp_list_entry_t arp_array[ARP_MAX_ENTRIES];
 static size_t arp_used = 0;
 
-static arp_list_entry_t * arp_list = 0; 
+static arp_list_entry_t * arp_list = 0;
 
 static arp_list_entry_t * arp_alloc(void) {
 
@@ -174,13 +175,15 @@ int csp_eth_rx(csp_iface_t * iface, csp_eth_header_t * eth_frame, uint32_t recei
         return CSP_ERR_INVAL;
     }
 
-    if (frame_length == 0 || frame_length > (CSP_BUFFER_SIZE + csp_id_get_header_size())) {
+    if (frame_length < csp_id_get_header_size() || frame_length > (CSP_BUFFER_SIZE + csp_id_get_header_size())) {
         iface->frame++;
         csp_print("eth rx frame_length of %u is invalid\n", frame_length);
         return CSP_ERR_INVAL;
     }
 
-    csp_packet_t * packet = csp_eth_pbuf_find(ifdata, packet_id, task_woken);
+    csp_id_t csp_id = csp_id_extract(eth_frame->frame_begin);
+
+    csp_packet_t * packet = csp_eth_pbuf_find(ifdata, packet_id, csp_id, task_woken);
 
     if (packet == NULL) {
         iface->drop++;
@@ -191,6 +194,7 @@ int csp_eth_rx(csp_iface_t * iface, csp_eth_header_t * eth_frame, uint32_t recei
     if (packet->frame_length == 0) {
         /* First segment */
         csp_id_setup_rx(packet);
+        packet->id = csp_id;
         packet->frame_length = frame_length;
         packet->rx_count = 0;
     }
@@ -217,20 +221,14 @@ int csp_eth_rx(csp_iface_t * iface, csp_eth_header_t * eth_frame, uint32_t recei
         return CSP_ERR_NONE;
     }
 
-    csp_eth_pbuf_free(ifdata, packet, false, task_woken);
+	packet->length = packet->frame_length - csp_id_get_header_size();
 
-    if (csp_id_strip(packet) != 0) {
-        csp_print("eth rx packet discarded due to error in ID field\n");
-        iface->frame++;
-        (task_woken) ? csp_buffer_free_isr(packet) : csp_buffer_free(packet);
-        return CSP_ERR_INVAL;
-    }
+    csp_eth_pbuf_free(ifdata, packet, false, task_woken);
 
     /* Record CSP and MAC addresses of source */
     csp_eth_arp_set_addr(eth_frame->ether_shost, packet->id.src);
 
     if (packet->id.dst != iface->addr && !ifdata->promisc) {
-        csp_eth_pbuf_free(ifdata, packet, true, task_woken);
         (task_woken) ? csp_buffer_free_isr(packet) : csp_buffer_free(packet);
         return CSP_ERR_NONE;
     }
@@ -255,7 +253,7 @@ int csp_eth_tx(csp_iface_t * iface, uint16_t via, csp_packet_t * packet, int fro
 
     csp_id_prepend(packet);
 
-    static uint16_t packet_id = 0;
+    static atomic_int packet_id = 0;
     packet_id++;
     uint16_t offset = 0;
 

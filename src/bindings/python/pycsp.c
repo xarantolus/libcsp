@@ -5,6 +5,7 @@
 #include <csp/csp.h>
 #include <csp/csp_cmp.h>
 #include <csp/csp_promisc.h>
+#include <csp/csp_id.h>
 #include <csp/interfaces/csp_if_zmqhub.h>
 #include <csp/interfaces/csp_if_kiss.h>
 #include <csp/drivers/usart.h>
@@ -210,60 +211,90 @@ static PyObject * pycsp_send(PyObject * self, PyObject * args) {
 	Py_RETURN_NONE;
 }
 
-#if 0
-static PyObject* pycsp_sfp_send(PyObject *self, PyObject *args) {
-    PyObject* conn_capsule;
-    Py_buffer data;
-    unsigned int mtu;
-    uint32_t timeout = 1000;
-    if (!PyArg_ParseTuple(args, "Ow*II|I", &conn_capsule, &data, &mtu, &timeout)) {
-        return NULL;
-    }
-
-    csp_conn_t* conn = get_obj_as_conn(conn_capsule, false);
-    if (conn == NULL) {
-        return NULL;
-    }
-
-    int res;
-    Py_BEGIN_ALLOW_THREADS;
-    res = csp_sfp_send(conn, data.buf, data.len, mtu, timeout);
-    Py_END_ALLOW_THREADS;
-    if (res != CSP_ERR_NONE) {
-        return PyErr_Error("sfp_send()", res);
-    }
-
-    return Py_BuildValue("i", res);
+static int pycsp_sfp_read_cb(uint8_t * buffer, uint32_t size, uint32_t offset, void * data) {
+	memcpy(buffer, (const uint8_t *)data + offset, size);
+	return CSP_ERR_NONE;
 }
 
-static PyObject* pycsp_sfp_recv(PyObject *self, PyObject *args) {
-    PyObject* conn_capsule;
-    uint32_t timeout = 500;
-    if (!PyArg_ParseTuple(args, "O|I", &conn_capsule, &timeout)) {
-        return NULL; // TypeError is thrown
-    }
-    csp_conn_t* conn = get_obj_as_conn(conn_capsule, false);
-    if (conn == NULL) {
-        return NULL;
-    }
-    void *dataout = NULL;
-    int return_datasize = 0;
-    int res;
-    Py_BEGIN_ALLOW_THREADS;
-    res = csp_sfp_recv(conn, &dataout, &return_datasize, timeout);
-    Py_END_ALLOW_THREADS;
+typedef struct {
+	uint8_t * buf;
+	uint32_t  totalsz;
+} pycsp_sfp_recv_ctx_t;
 
-    if (dataout == NULL) {
-        Py_RETURN_NONE;
-    }
-
-    if (res != CSP_ERR_NONE) {
-        return PyErr_Error("sfp_recv()", res);
-    }
-
-    return PyCapsule_New(dataout, PACKET_CAPSULE, pycsp_free_csp_buffer);
+static int pycsp_sfp_write_cb(const uint8_t * buffer, uint32_t size, uint32_t offset, uint32_t totalsz, void * data) {
+	pycsp_sfp_recv_ctx_t * ctx = data;
+	if (ctx->buf == NULL) {
+		ctx->buf = malloc(totalsz);
+		if (ctx->buf == NULL) {
+			return CSP_ERR_NOMEM;
+		}
+		ctx->totalsz = totalsz;
+	}
+	memcpy(ctx->buf + offset, buffer, size);
+	return CSP_ERR_NONE;
 }
-#endif
+
+static PyObject * pycsp_sfp_send(PyObject * self, PyObject * args) {
+	PyObject * conn_capsule;
+	Py_buffer data;
+	unsigned int mtu;
+	uint32_t timeout = 1000;
+	if (!PyArg_ParseTuple(args, "Oy*I|I", &conn_capsule, &data, &mtu, &timeout)) {
+		return NULL;
+	}
+
+	csp_conn_t * conn = get_obj_as_conn(conn_capsule, false);
+	if (conn == NULL) {
+		PyBuffer_Release(&data);
+		return NULL;
+	}
+
+	csp_sfp_read_t user = { .data = data.buf, .read = pycsp_sfp_read_cb };
+
+	int res;
+	Py_BEGIN_ALLOW_THREADS;
+	res = csp_sfp_send(conn, &user, data.len, mtu, timeout);
+	Py_END_ALLOW_THREADS;
+	PyBuffer_Release(&data);
+
+	if (res != CSP_ERR_NONE) {
+		return PyErr_Error("sfp_send()", res);
+	}
+	Py_RETURN_NONE;
+}
+
+static PyObject * pycsp_sfp_recv(PyObject * self, PyObject * args) {
+	PyObject * conn_capsule;
+	uint32_t timeout = 500;
+	if (!PyArg_ParseTuple(args, "O|I", &conn_capsule, &timeout)) {
+		return NULL;
+	}
+	csp_conn_t * conn = get_obj_as_conn(conn_capsule, false);
+	if (conn == NULL) {
+		return NULL;
+	}
+
+	pycsp_sfp_recv_ctx_t ctx = { .buf = NULL, .totalsz = 0 };
+	csp_sfp_recv_t user = { .data = &ctx, .write = pycsp_sfp_write_cb };
+
+	int res;
+	Py_BEGIN_ALLOW_THREADS;
+	res = csp_sfp_recv(conn, &user, timeout);
+	Py_END_ALLOW_THREADS;
+
+	if (res != CSP_ERR_NONE) {
+		free(ctx.buf);
+		return PyErr_Error("sfp_recv()", res);
+	}
+
+	if (ctx.buf == NULL) {
+		Py_RETURN_NONE;
+	}
+
+	PyObject * result = PyBytes_FromStringAndSize((char *)ctx.buf, ctx.totalsz);
+	free(ctx.buf);
+	return result;
+}
 
 static PyObject * pycsp_transaction(PyObject * self, PyObject * args) {
 	uint8_t prio;
@@ -588,6 +619,117 @@ static PyObject * pycsp_rdp_get_opt(PyObject * self, PyObject * args) {
 						 ack_delay_count);
 }
 
+typedef struct {
+	csp_iface_t iface;
+	PyObject * py_nexthop;
+} pycsp_iface_wrapper_t;
+
+static int pycsp_nexthop_trampoline(csp_iface_t * iface,
+									uint16_t via,
+									csp_packet_t * packet,
+									int from_me) {
+
+	pycsp_iface_wrapper_t * wrapper =
+		(pycsp_iface_wrapper_t *) iface->interface_data;
+
+	if (!wrapper || !wrapper->py_nexthop) {
+		return CSP_ERR_INVAL;
+	}
+
+	PyGILState_STATE gstate = PyGILState_Ensure();
+
+	PyObject * iface_capsule =
+		PyCapsule_New(iface, "csp_iface_t", NULL);
+
+	PyObject * packet_capsule =
+		PyCapsule_New(packet, PACKET_CAPSULE, NULL);
+
+	PyObject * result = PyObject_CallFunction(
+		wrapper->py_nexthop,
+		"NHNi",   // PyObject (steals ref), uint16, PyObject (steals ref), int
+		iface_capsule,
+		via,
+		packet_capsule,
+		from_me
+	);
+
+	int ret = CSP_ERR_NONE;
+
+	if (!result) {
+		PyErr_Print();
+		ret = CSP_ERR_INVAL;
+	} else {
+		if (PyLong_Check(result)) {
+			ret = (int) PyLong_AsLong(result);
+		}
+		Py_DECREF(result);
+	}
+
+	PyGILState_Release(gstate);
+	return ret;
+}
+
+static PyObject * pycsp_iface_add(PyObject * self, PyObject * args) {
+
+	uint16_t addr;
+	uint16_t netmask;
+	const char * name;
+	PyObject * py_nexthop;
+
+	if (!PyArg_ParseTuple(args, "HHsO", &addr, &netmask, &name, &py_nexthop)) {
+		return NULL;
+	}
+
+	if (!PyCallable_Check(py_nexthop)) {
+		PyErr_SetString(PyExc_TypeError, "nexthop must be callable");
+		return NULL;
+	}
+
+	pycsp_iface_wrapper_t * wrapper =
+		PyMem_RawCalloc(1, sizeof(*wrapper));
+
+	if (!wrapper) {
+		return PyErr_NoMemory();
+	}
+
+	// Fill iface
+	wrapper->iface.addr = addr;
+	wrapper->iface.netmask = netmask;
+	wrapper->iface.name = strdup(name);  // ensure lifetime!
+	wrapper->iface.interface_data = wrapper;
+	wrapper->iface.driver_data = NULL;
+	wrapper->iface.nexthop = pycsp_nexthop_trampoline;
+	wrapper->iface.is_default = 0;
+
+	// Store Python callback
+	Py_INCREF(py_nexthop);
+	wrapper->py_nexthop = py_nexthop;
+
+	// Register with CSP
+	csp_iflist_add(&wrapper->iface);
+
+	Py_RETURN_NONE;
+}
+
+static PyObject * pycsp_qfifo_write(PyObject * self, PyObject * args) {
+	PyObject * packet_capsule;
+	char * interface_name;
+	if (!PyArg_ParseTuple(args, "Os", &packet_capsule, &interface_name)) {
+		return NULL;  // TypeError is thrown
+	}
+
+	csp_packet_t * packet = get_obj_as_packet(packet_capsule, false);
+	if (packet == NULL) {
+		return NULL;  // TypeError is thrown
+	}
+
+	csp_iface_t * iface = csp_iflist_get_by_name(interface_name);
+
+	csp_qfifo_write(packet, iface, NULL); // todo: handle pxTaskWoken != NULL case?
+
+	Py_RETURN_NONE;
+}
+
 #if CSP_USE_RTABLE
 
 static PyObject * pycsp_rtable_set(PyObject * self, PyObject * args) {
@@ -722,6 +864,32 @@ static PyObject * pycsp_packet_get_id(PyObject * self, PyObject * capsule) {
 	            | (((uint32_t)(p->id.sport) & 0x3FU) << 8)
 	            | (((uint32_t)(p->id.flags) & 0xFFU));
 	return PyLong_FromUnsignedLong(id);
+static PyObject * pycsp_id_prepend(PyObject * self, PyObject * packet_capsule) {
+	csp_packet_t * packet = get_obj_as_packet(packet_capsule, false);
+	if (packet == NULL) {
+		return NULL;  // TypeError is thrown
+	}
+	csp_id_prepend(packet);
+
+	Py_RETURN_NONE;
+}
+
+static PyObject * pycsp_id_strip(PyObject * self, PyObject * packet_capsule) {
+	csp_packet_t * packet = get_obj_as_packet(packet_capsule, false);
+	if (packet == NULL) {
+		return NULL;  // TypeError is thrown
+	}
+	int res = csp_id_strip(packet);
+	return Py_BuildValue("i", res);
+}
+
+static PyObject * pycsp_id_setup_rx(PyObject * self, PyObject * packet_capsule) {
+	csp_packet_t * packet = get_obj_as_packet(packet_capsule, false);
+	if (packet == NULL) {
+		return NULL;  // TypeError is thrown
+	}
+	int res = csp_id_setup_rx(packet);
+	return Py_BuildValue("i", res);
 }
 
 static PyObject * pycsp_cmp_ident(PyObject * self, PyObject * args) {
@@ -731,7 +899,7 @@ static PyObject * pycsp_cmp_ident(PyObject * self, PyObject * args) {
 		return NULL;  // TypeError is thrown
 	}
 
-	struct csp_cmp_message msg;
+	struct csp_cmp_ident_msg msg;
 	memset(&msg, 0, sizeof(msg));
 	int res;
 	Py_BEGIN_ALLOW_THREADS;
@@ -742,11 +910,11 @@ static PyObject * pycsp_cmp_ident(PyObject * self, PyObject * args) {
 	}
 	return Py_BuildValue("isssss",
 						 res,
-						 msg.ident.hostname,
-						 msg.ident.model,
-						 msg.ident.revision,
-						 msg.ident.date,
-						 msg.ident.time);
+						 msg.hostname,
+						 msg.model,
+						 msg.revision,
+						 msg.date,
+						 msg.time);
 }
 
 static PyObject * pycsp_cmp_route_set(PyObject * self, PyObject * args) {
@@ -759,11 +927,11 @@ static PyObject * pycsp_cmp_route_set(PyObject * self, PyObject * args) {
 		return NULL;  // TypeError is thrown
 	}
 
-	struct csp_cmp_message msg;
+	struct csp_cmp_route_set_v2_msg msg;
 	memset(&msg, 0, sizeof(msg));
-	msg.route_set_v2.dest_node = htobe16(addr);
-	msg.route_set_v2.next_hop_via = htobe16(via);
-	strncpy(msg.route_set_v2.interface, ifstr, sizeof(msg.route_set_v2.interface) - 1);
+	msg.dest_node = htobe16(addr);
+	msg.next_hop_via = htobe16(via);
+	strncpy(msg.interface, ifstr, sizeof(msg.interface) - 1);
 
 	int res;
 	Py_BEGIN_ALLOW_THREADS;
@@ -790,19 +958,20 @@ static PyObject * pycsp_cmp_peek(PyObject * self, PyObject * args) {
 		return PyErr_Error("csp_cmp_peek() - exceeding max size", CSP_ERR_INVAL);
 	}
 
-	struct csp_cmp_message msg;
-	memset(&msg, 0, sizeof(msg));
-	msg.peek.addr = htobe32(addr);
-	msg.peek.len = len;
+	uint8_t buffer[CMP_PEEK_SIZE(CSP_CMP_PEEK_MAX_LEN)];
+	memset(buffer, 0, sizeof(buffer));
+	struct csp_cmp_peek_msg * msg = (struct csp_cmp_peek_msg *)buffer;
+	msg->addr = htobe32(addr);
+	msg->len = len;
 
 	int res;
 	Py_BEGIN_ALLOW_THREADS;
-	res = csp_cmp_peek(node, timeout, &msg);
+	res = csp_cmp_peek(node, timeout, msg);
 	Py_END_ALLOW_THREADS;
 	if (res != CSP_ERR_NONE) {
 		return PyErr_Error("csp_cmp_peek()", res);
 	}
-	memcpy(outbuf.buf, msg.peek.data, len);
+	memcpy(outbuf.buf, msg->data, len);
 	outbuf.len = len;
 
 	Py_RETURN_NONE;
@@ -822,14 +991,16 @@ static PyObject * pycsp_cmp_poke(PyObject * self, PyObject * args) {
 	if (len > CSP_CMP_POKE_MAX_LEN) {
 		return PyErr_Error("csp_cmp_poke() - exceeding max size", CSP_ERR_INVAL);
 	}
-	struct csp_cmp_message msg;
-	msg.poke.addr = htobe32(addr);
-	msg.poke.len = len;
-	memcpy(msg.poke.data, inbuf.buf, len);
+	uint8_t buffer[CMP_POKE_SIZE(CSP_CMP_POKE_MAX_LEN)];
+	memset(buffer, 0, sizeof(buffer));
+	struct csp_cmp_poke_msg * msg = (struct csp_cmp_poke_msg *)buffer;
+	msg->addr = htobe32(addr);
+	msg->len = len;
+	memcpy(msg->data, inbuf.buf, len);
 
 	int res;
 	Py_BEGIN_ALLOW_THREADS;
-	res = csp_cmp_poke(node, timeout, &msg);
+	res = csp_cmp_poke(node, timeout, msg);
 	Py_END_ALLOW_THREADS;
 	if (res != CSP_ERR_NONE) {
 		return PyErr_Error("csp_cmp_poke()", res);
@@ -851,7 +1022,7 @@ static PyObject * pycsp_cmp_clock_set(PyObject * self, PyObject * args) {
 		return PyErr_Error("csp_cmp_clock(set) - seconds are 0", CSP_ERR_INVAL);
 	}
 
-	struct csp_cmp_message msg;
+	struct csp_cmp_clock_msg msg;
 	memset(&msg, 0, sizeof(msg));
 	msg.clock.tv_sec = htobe32(sec);
 	msg.clock.tv_nsec = htobe32(nsec);
@@ -874,7 +1045,7 @@ static PyObject * pycsp_cmp_clock_get(PyObject * self, PyObject * args) {
 		Py_RETURN_NONE;
 	}
 
-	struct csp_cmp_message msg;
+	struct csp_cmp_clock_msg msg;
 	memset(&msg, 0, sizeof(msg));
 
 	int res;
@@ -987,6 +1158,27 @@ static PyObject * pycsp_packet_set_data(PyObject * self, PyObject * args) {
 	Py_RETURN_NONE;
 }
 
+static PyObject * pycsp_packet_set_frame_data(PyObject * self, PyObject * args) {
+	PyObject * packet_capsule;
+	Py_buffer data;
+	if (!PyArg_ParseTuple(args, "Oy*", &packet_capsule, &data)) {
+		return NULL;  // TypeError is thrown
+	}
+
+	csp_packet_t * packet = get_obj_as_packet(packet_capsule, false);
+	if (packet == NULL) {
+		return NULL;  // TypeError is thrown
+	}
+	if (data.len > csp_id_get_header_size() + (int)sizeof(packet->data)) {
+		return PyErr_Error("packet_set_frame_data() - exceeding frame size", CSP_ERR_INVAL);
+	}
+
+	memcpy(packet->frame_begin, data.buf, data.len);
+	packet->frame_length = data.len;
+
+	Py_RETURN_NONE;
+}
+
 static PyObject * pycsp_packet_get_data(PyObject * self, PyObject * packet_capsule) {
 	csp_packet_t * packet = get_obj_as_packet(packet_capsule, false);
 	if (packet == NULL) {
@@ -995,12 +1187,76 @@ static PyObject * pycsp_packet_get_data(PyObject * self, PyObject * packet_capsu
 	return Py_BuildValue("y#", packet->data, (size_t)packet->length);
 }
 
+static PyObject * pycsp_packet_get_frame_data(PyObject * self, PyObject * packet_capsule) {
+	csp_packet_t * packet = get_obj_as_packet(packet_capsule, false);
+	if (packet == NULL) {
+		return NULL;  // TypeError is thrown
+	}
+	return Py_BuildValue("y#", packet->frame_begin, (size_t)packet->frame_length);
+}
+
 static PyObject * pycsp_packet_get_length(PyObject * self, PyObject * packet_capsule) {
 	csp_packet_t * packet = get_obj_as_packet(packet_capsule, false);
 	if (packet == NULL) {
 		return NULL;  // TypeError is thrown
 	}
 	return Py_BuildValue("H", packet->length);
+}
+
+static PyObject * pycsp_packet_get_frame_length(PyObject * self, PyObject * packet_capsule) {
+	csp_packet_t * packet = get_obj_as_packet(packet_capsule, false);
+	if (packet == NULL) {
+		return NULL;  // TypeError is thrown
+	}
+	return Py_BuildValue("H", packet->frame_length);
+}
+
+static PyObject * pycsp_packet_get_pri(PyObject * self, PyObject * packet_capsule) {
+	csp_packet_t * packet = get_obj_as_packet(packet_capsule, false);
+	if (packet == NULL) {
+		return NULL;  // TypeError is thrown
+	}
+	return Py_BuildValue("B", packet->id.pri);
+}
+
+static PyObject * pycsp_packet_get_flags(PyObject * self, PyObject * packet_capsule) {
+	csp_packet_t * packet = get_obj_as_packet(packet_capsule, false);
+	if (packet == NULL) {
+		return NULL;  // TypeError is thrown
+	}
+	return Py_BuildValue("B", packet->id.flags);
+}
+
+static PyObject * pycsp_packet_get_src(PyObject * self, PyObject * packet_capsule) {
+	csp_packet_t * packet = get_obj_as_packet(packet_capsule, false);
+	if (packet == NULL) {
+		return NULL;  // TypeError is thrown
+	}
+	return Py_BuildValue("H", packet->id.src);
+}
+
+static PyObject * pycsp_packet_get_dst(PyObject * self, PyObject * packet_capsule) {
+	csp_packet_t * packet = get_obj_as_packet(packet_capsule, false);
+	if (packet == NULL) {
+		return NULL;  // TypeError is thrown
+	}
+	return Py_BuildValue("H", packet->id.dst);
+}
+
+static PyObject * pycsp_packet_get_dport(PyObject * self, PyObject * packet_capsule) {
+	csp_packet_t * packet = get_obj_as_packet(packet_capsule, false);
+	if (packet == NULL) {
+		return NULL;  // TypeError is thrown
+	}
+	return Py_BuildValue("B", packet->id.dport);
+}
+
+static PyObject * pycsp_packet_get_sport(PyObject * self, PyObject * packet_capsule) {
+	csp_packet_t * packet = get_obj_as_packet(packet_capsule, false);
+	if (packet == NULL) {
+		return NULL;  // TypeError is thrown
+	}
+	return Py_BuildValue("B", packet->id.sport);
 }
 
 static PyObject * pycsp_print_connections(PyObject * self, PyObject * args) {
@@ -1025,8 +1281,8 @@ static PyMethodDef methods[] = {
 	{"accept", pycsp_accept, METH_VARARGS, ""},
 	{"read", pycsp_read, METH_VARARGS, ""},
 	{"send", pycsp_send, METH_VARARGS, ""},
-	//{"sfp_send",            pycsp_sfp_send,            METH_VARARGS, ""},
-	//{"sfp_recv",            pycsp_sfp_recv,            METH_VARARGS, ""},
+	{"sfp_send", pycsp_sfp_send, METH_VARARGS, ""},
+	{"sfp_recv", pycsp_sfp_recv, METH_VARARGS, ""},
 	{"transaction", pycsp_transaction, METH_VARARGS, ""},
 	{"sendto_reply", pycsp_sendto_reply, METH_VARARGS, ""},
 	{"sendto", pycsp_sendto, METH_VARARGS, ""},
@@ -1045,6 +1301,9 @@ static PyMethodDef methods[] = {
 	{"shutdown", pycsp_shutdown, METH_VARARGS, ""},
 	{"rdp_set_opt", pycsp_rdp_set_opt, METH_VARARGS, ""},
 	{"rdp_get_opt", pycsp_rdp_get_opt, METH_NOARGS, ""},
+
+	{"iface_add", pycsp_iface_add, METH_VARARGS, "Add CSP interface"},
+	{"qfifo_write", pycsp_qfifo_write, METH_VARARGS, ""},
 
 #if CSP_USE_RTABLE
 	/* csp/csp_rtable.h */
@@ -1068,6 +1327,10 @@ static PyMethodDef methods[] = {
 	/* csp_id_t accessor — single packed-id getter; callers parse out
 	   src/dst/sport/dport/prio/flags themselves. */
 	{"packet_get_id", pycsp_packet_get_id, METH_O, ""},
+	/* csp/csp_id.h */
+	{"id_prepend", pycsp_id_prepend, METH_O, ""},
+	{"id_strip", pycsp_id_strip, METH_O, ""},
+	{"id_setup_rx", pycsp_id_setup_rx, METH_O, ""},
 
 	/* csp/csp_cmp.h */
 	{"cmp_ident", pycsp_cmp_ident, METH_VARARGS, ""},
@@ -1090,8 +1353,17 @@ static PyMethodDef methods[] = {
 
 	/* helpers */
 	{"packet_get_length", pycsp_packet_get_length, METH_O, ""},
+	{"packet_get_frame_length", pycsp_packet_get_frame_length, METH_O, ""},
 	{"packet_get_data", pycsp_packet_get_data, METH_O, ""},
+	{"packet_get_frame_data", pycsp_packet_get_frame_data, METH_O, ""},
+	{"packet_get_pri", pycsp_packet_get_pri, METH_O, ""},
+	{"packet_get_flags", pycsp_packet_get_flags, METH_O, ""},
+	{"packet_get_src", pycsp_packet_get_src, METH_O, ""},
+	{"packet_get_dst", pycsp_packet_get_dst, METH_O, ""},
+	{"packet_get_dport", pycsp_packet_get_dport, METH_O, ""},
+	{"packet_get_sport", pycsp_packet_get_sport, METH_O, ""},
 	{"packet_set_data", pycsp_packet_set_data, METH_VARARGS, ""},
+	{"packet_set_frame_data", pycsp_packet_set_frame_data, METH_VARARGS, ""},
 	{"print_connections", pycsp_print_connections, METH_NOARGS, ""},
 	{"print_interfaces", pycsp_print_interfaces, METH_NOARGS, ""},
 
