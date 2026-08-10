@@ -10,6 +10,11 @@ static char csp_promisc_queue_buffer[sizeof(csp_packet_t *) * CSP_CONN_RXQUEUE_L
 
 static int csp_promisc_enabled = 0;
 
+/* The promiscuous tap is a diagnostic feed cloned from the shared buffer pool.
+ * It must never compete the routing core down to exhaustion, so it only clones
+ * while at least a quarter of the pool is free — otherwise the clone is dropped. */
+#define CSP_PROMISC_BUFFER_RESERVE (CSP_BUFFER_COUNT / 4)
+
 int csp_promisc_enable(unsigned int queue_size) {
 	(void)queue_size; /* Avoid compiler warnings about unused parameter */
 
@@ -50,6 +55,11 @@ void csp_promisc_add(csp_packet_t * packet) {
 		return;
 
 	if (csp_promisc_queue != NULL) {
+		/* Yield to real traffic when the pool runs low. */
+		if (csp_buffer_remaining() <= CSP_PROMISC_BUFFER_RESERVE) {
+			csp_dbg_conn_ovf++;
+			return;
+		}
 		/* Make a copy of the message and queue it to the promiscuous task */
 		csp_packet_t * packet_copy = csp_buffer_clone(packet);
 		if (packet_copy != NULL) {
