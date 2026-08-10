@@ -51,6 +51,7 @@ typedef struct {
 	uint32_t ack_timeout;
 	uint32_t ack_delay_count;
 	uint32_t ack_timestamp;
+	uint32_t retransmits;  /**< Retransmit rounds since the last forward progress */
 	csp_bin_sem_t tx_wait;
 
 } csp_rdp_t;

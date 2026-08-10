@@ -21,6 +21,12 @@
 #define CSP_RDP_MIN_ACK_TIMEOUT 10
 #endif
 
+/* How many times an unacknowledged segment is retransmitted before the
+   connection is given up on. */
+#ifndef CSP_RDP_MAX_RETRANSMITS
+#define CSP_RDP_MAX_RETRANSMITS 10
+#endif
+
 bool csp_rdp_new_packet(csp_conn_t * conn, csp_packet_t * packet);
 
 void csp_rdp_init(csp_conn_t * conn);

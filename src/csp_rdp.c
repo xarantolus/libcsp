@@ -53,6 +53,7 @@ typedef struct __packed {
 
 
 
+
 static int csp_rdp_close_internal(csp_conn_t * conn, uint8_t closed_by, bool send_rst);
 
 static uint32_t csp_rdp_clamp(uint32_t value, uint32_t min, uint32_t max) {
@@ -377,6 +378,7 @@ void csp_rdp_check_timeouts(csp_conn_t * conn) {
 	 * MESSAGE TIMEOUT:
 	 * Check each outgoing message for TX timeout
 	 */
+	bool retransmitted = false;
 	int count = csp_rdp_queue_tx_size();
 	for (int i = 0; i < count; i++) {
 
@@ -413,6 +415,7 @@ void csp_rdp_check_timeouts(csp_conn_t * conn) {
 				packet->timestamp_tx = csp_get_ms();
 				csp_buffer_copy(packet, new_packet);
 				csp_send_direct(&conn->idout, new_packet, NULL);
+				retransmitted = true;
 			} else {
 				csp_rdp_error("RDP %p: Failed to allocate packet buffer\n", (void *)conn);
 			}
@@ -421,6 +424,20 @@ void csp_rdp_check_timeouts(csp_conn_t * conn) {
 		/* Requeue the TX element */
 		csp_rdp_queue_tx_add(conn, packet);
 
+	}
+
+	/* Give up on a peer that never acknowledges anything, rather than
+	   retransmitting for as long as the connection happens to live. */
+	if (retransmitted && (++conn->rdp.retransmits > CSP_RDP_MAX_RETRANSMITS)) {
+		csp_rdp_error("RDP %p: No progress after %u retransmissions, closing\n",
+					  (void *)conn, (unsigned int)CSP_RDP_MAX_RETRANSMITS);
+		uint8_t closed_by = CSP_RDP_CLOSED_BY_PROTOCOL | CSP_RDP_CLOSED_BY_TIMEOUT;
+		if (conn->dest_socket != NULL) {
+			closed_by |= CSP_RDP_CLOSED_BY_USERSPACE;
+		}
+		csp_conn_close(conn, closed_by);
+		csp_bin_sem_post(&conn->rdp.tx_wait);
+		return;
 	}
 
 	if (conn->rdp.state == RDP_OPEN) {
@@ -583,6 +600,7 @@ bool csp_rdp_new_packet(csp_conn_t * conn, csp_packet_t * packet) {
 				conn->rdp.rcv_irs = rx_header->seq_nr;
 				conn->rdp.rcv_lsa = rx_header->seq_nr - 1;
 				conn->rdp.snd_una = rx_header->ack_nr + 1;
+				conn->rdp.retransmits = 0;
 				conn->rdp.ack_timestamp = csp_get_ms();
 				conn->rdp.state = RDP_OPEN;
 
@@ -688,6 +706,7 @@ bool csp_rdp_new_packet(csp_conn_t * conn, csp_packet_t * packet) {
 
 			/* Store current ack'ed sequence number */
 			conn->rdp.snd_una = rx_header->ack_nr + 1;
+			conn->rdp.retransmits = 0;
 
 			/* We have an EACK */
 			if (rx_header->flags & RDP_EAK) {
@@ -786,6 +805,7 @@ int csp_rdp_connect(csp_conn_t * conn) {
 	conn->rdp.ack_timeout = csp_rdp_ack_timeout;
 	conn->rdp.ack_delay_count = csp_rdp_ack_delay_count;
 	conn->rdp.ack_timestamp = csp_get_ms();
+	conn->rdp.retransmits = 0;
 
 retry:
 	csp_rdp_protocol("RDP %p: Active connect, conn state %u\n", (void *)conn, conn->rdp.state);
@@ -896,6 +916,7 @@ void csp_rdp_init(csp_conn_t * conn) {
 	/* Set initial state */
 	conn->rdp.state = RDP_CLOSED;
 	conn->rdp.closed_by = 0;
+	conn->rdp.retransmits = 0;
 	conn->rdp.conn_timeout = csp_rdp_conn_timeout;
 	conn->rdp.packet_timeout = csp_rdp_packet_timeout;
 

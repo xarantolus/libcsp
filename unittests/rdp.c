@@ -1,6 +1,7 @@
 #include <check.h>
 #include <string.h>
 #include <endian.h>
+#include <unistd.h>
 
 #include "../include/csp/csp.h"
 #include "../include/csp/csp_id.h"
@@ -103,6 +104,11 @@ static const csp_conn_t * find_rdp_conn(void) {
 		}
 	}
 	return NULL;
+}
+
+/* The peer's half of the handshake, completing the connection. */
+static void ack_handshake(uint16_t iss) {
+	put_header_and_route(new_rdp_packet(), RDP_ACK, 1001, iss);
 }
 
 START_TEST(test_rdp_syn_without_options_is_rejected)
@@ -209,10 +215,68 @@ START_TEST(test_rdp_delayed_acks_is_a_flag)
 }
 END_TEST
 
+START_TEST(test_rdp_retransmits_are_limited)
+{
+	setup_stack();
+
+	/* Longest connection lifetime and fastest retransmit the peer may ask for,
+	   so the retransmit limit is what ends this, not the connection timeout. */
+	const uint32_t opts[6] = { 4, CSP_RDP_MAX_CONN_TIMEOUT, 0, 1, 250, 2 };
+	send_syn(opts);
+	ck_assert_ptr_nonnull(find_rdp_conn());
+
+	const unsigned int tx_after_syn = test_tx_count;
+
+	/* The peer never acknowledges the SYN/ACK. */
+	for (int i = 0; (i < 1000) && (find_rdp_conn() != NULL); i++) {
+		csp_conn_check_timeouts();
+		usleep(20000);
+	}
+
+	ck_assert_ptr_null(find_rdp_conn());
+
+	/* Retransmissions of the SYN/ACK, plus the RST that closes it. Bounded on
+	   both sides: giving up immediately is as wrong as never giving up. */
+	const unsigned int sent = test_tx_count - tx_after_syn;
+	ck_assert_uint_ge(sent, CSP_RDP_MAX_RETRANSMITS);
+	ck_assert_uint_le(sent, CSP_RDP_MAX_RETRANSMITS + 2);
+}
+END_TEST
+
+START_TEST(test_rdp_retransmit_count_resets_on_ack)
+{
+	setup_stack();
+
+	/* Half-open, so the SYN/ACK stays queued and is retransmitted. */
+	const uint32_t opts[6] = { 4, CSP_RDP_MAX_CONN_TIMEOUT, 0, 1, 250, 2 };
+	send_syn(opts);
+	ck_assert_ptr_nonnull(find_rdp_conn());
+
+	/* Accumulate failed attempts, staying well under the limit. */
+	const uint32_t target = 3;
+	for (int i = 0; (i < 1000) && (find_rdp_conn() != NULL) &&
+	                (find_rdp_conn()->rdp.retransmits < target); i++) {
+		csp_conn_check_timeouts();
+		usleep(20000);
+	}
+	ck_assert_ptr_nonnull(find_rdp_conn());
+	ck_assert_uint_ge(find_rdp_conn()->rdp.retransmits, target);
+
+	/* The peer answers. Attempts already spent must not count against it. */
+	ack_handshake(find_rdp_conn()->rdp.snd_iss);
+
+	const csp_conn_t * conn = find_rdp_conn();
+	ck_assert_ptr_nonnull(conn);
+	ck_assert_int_eq(conn->rdp.state, RDP_OPEN);
+	ck_assert_uint_eq(conn->rdp.retransmits, 0);
+}
+END_TEST
+
 Suite * rdp_suite(void)
 {
 	Suite * s;
 	TCase * tc_syn;
+	TCase * tc_tx;
 
 	s = suite_create("RDP");
 
@@ -224,6 +288,14 @@ Suite * rdp_suite(void)
 	tcase_add_test(tc_syn, test_rdp_syn_keeps_valid_options);
 	tcase_add_test(tc_syn, test_rdp_delayed_acks_is_a_flag);
 	suite_add_tcase(s, tc_syn);
+
+	tc_tx = tcase_create("retransmit");
+	/* These drive the retransmit timer in real time, so they need more than
+	   the default per-test budget on a loaded machine. */
+	tcase_set_timeout(tc_tx, 60);
+	tcase_add_test(tc_tx, test_rdp_retransmits_are_limited);
+	tcase_add_test(tc_tx, test_rdp_retransmit_count_resets_on_ack);
+	suite_add_tcase(s, tc_tx);
 
 	return s;
 }
