@@ -1,6 +1,10 @@
-add_subdirectory(simple-send-canbus)
+if(NOT APPLE)
+  # simple-send-canbus needs the socketcan driver (Linux-only) and
+  # simple-sfp-send-recv uses pthread_timedjoin_np (glibc extension)
+  add_subdirectory(simple-send-canbus)
+  add_subdirectory(simple-sfp-send-recv)
+endif()
 add_subdirectory(simple-send-usart)
 add_subdirectory(hmac)
 add_subdirectory(simple-send-udp)
 add_subdirectory(simple-send-zmq)
-add_subdirectory(simple-sfp-send-recv)

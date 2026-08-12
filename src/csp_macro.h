@@ -8,7 +8,7 @@
 /* Mach-O has no plain ".noinit" section (a section specifier needs
  * "segment,section"), so builds on macOS fail to compile. __noinit is only a
  * skip-zero-initialization optimization for embedded RAM; plain
- * zero-initialized statics are a safe superset on a hosted OS. */
+ * zero-initialized static variables are a safe superset on a hosted OS. */
 #if defined(__APPLE__)
 #define __noinit
 #else
@@ -20,6 +20,12 @@
 #ifdef __CYGWIN__
 #define __weak
 #else
+#if defined(__APPLE__)
+/* Apple clang predefines __weak as an Objective-C ownership qualifier (a
+ * no-op in plain C). Weak symbol definitions are still supported on Mach-O,
+ * so replace the built-in macro with the usual weak-symbol attribute. */
+#undef __weak
+#endif
 #define __weak   __attribute__((__weak__))
 #endif
 

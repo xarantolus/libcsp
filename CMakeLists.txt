@@ -46,6 +46,8 @@ option(CSP_ENABLE_KISS_CRC "Enables the extra CRC in the KISS interface (legacy)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set(CSP_POSIX 1)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  set(CSP_POSIX 1)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "CYGWIN")
   set(CSP_POSIX 1)
   message(WARNING "CYGWIN detected: experimental port and ethernet not implemented")
@@ -60,7 +62,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Generic")
   endif()
 endif()
 
-if(CSP_POSIX AND CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+if(CSP_POSIX)
 
   include(CheckIncludeFiles)
   check_include_files(sys/socket.h HAVE_SYS_SOCKET_H)
@@ -126,7 +128,7 @@ if(CSP_POSIX)
     -Wpointer-arith
     -Wshadow
     -Wwrite-strings
-    $<$<C_COMPILER_ID:Clang>:-Wno-gnu-zero-variadic-macro-arguments>)
+    $<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-gnu-zero-variadic-macro-arguments>)
 endif()
 target_link_libraries(csp PRIVATE csp_common)
 
@@ -146,7 +148,7 @@ if(${CSP_ENABLE_PYTHON3_BINDINGS})
   if(Python3_Development.Module_FOUND)
     Python3_add_library(libcsp_py3 MODULE WITH_SOABI src/bindings/python/pycsp.c)
     add_compile_options(-Wno-missing-prototypes -Wno-unused-parameter)
-    target_include_directories(libcsp_py3 PUBLIC ${csp_inc})
+    target_include_directories(libcsp_py3 PUBLIC ${csp_inc} PRIVATE ${csp_inc_src})
     target_link_libraries(libcsp_py3 PUBLIC csp)
   else()
     message(FATAL_ERROR "Python development module not found")

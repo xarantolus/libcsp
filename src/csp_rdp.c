@@ -10,7 +10,7 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <endian.h>
+#include "csp_endian.h"
 
 #include <csp/csp.h>
 #include <csp/csp_debug.h>

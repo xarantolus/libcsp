@@ -1,8 +1,8 @@
-/* <endian.h> is glibc/musl-only, so libcsp sources including it don't compile
- * on macOS. This shim sits on the build's `-I src` include path: on macOS it
- * maps the glibc byte-order macros onto libkern's, everywhere else it defers
- * to the real system header via #include_next, so Linux builds see the exact
- * same header they always did. */
+/* Byte-order conversion macros (htobe16 ... le64toh) for libcsp sources.
+ *
+ * The <endian.h> header providing these is a glibc/musl extension that
+ * macOS doesn't ship. There, map the macros onto libkern's OSByteOrder;
+ * everywhere else this is exactly the system <endian.h>. */
 #pragma once
 
 #if defined(__APPLE__)
@@ -33,6 +33,6 @@
 
 #else /* !__APPLE__ */
 
-#include_next <endian.h>
+#include <endian.h>
 
 #endif
