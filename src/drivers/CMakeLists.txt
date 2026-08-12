@@ -6,7 +6,7 @@ if(LIBSOCKETCAN_FOUND)
     ${csp_inc}
     ${LIBSOCKETCAN_INCLUDE_DIRS})
   target_link_libraries(driver_can PRIVATE csp_common
-    ${LIBSOCKETCAN_LIBRARIES})
+    ${LIBSOCKETCAN_LINK_LIBRARIES})
   target_link_libraries(csp PRIVATE driver_can)
   if(BUILD_SHARED_LIBS)
     set_property(TARGET driver_can PROPERTY POSITION_INDEPENDENT_CODE ON)
@@ -14,8 +14,11 @@ if(LIBSOCKETCAN_FOUND)
 endif()
 
 if(CSP_POSIX)
+  # The usart driver is plain POSIX termios, which macOS supports too
   target_sources(csp PRIVATE usart/usart_linux.c)
-  target_sources(csp PRIVATE eth/eth_linux.c)
+  if(NOT APPLE)
+    target_sources(csp PRIVATE eth/eth_linux.c)
+  endif()
 elseif(CSP_ZEPHYR)
   target_sources(csp PRIVATE usart/usart_zephyr.c)
 endif()

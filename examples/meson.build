@@ -28,12 +28,15 @@ executable('csp_client',
 	objects : csp_posix_helper,
 	build_by_default : false)
 
-executable('csp_bridge_can2udp',
-	['csp_bridge_can2udp.c'],
-	include_directories : csp_inc,
-	c_args : csp_c_args,
-	dependencies : csp_dep,
-	build_by_default : false)
+if host_machine.system() == 'linux'
+	# Needs the socketcan driver, which is Linux-only
+	executable('csp_bridge_can2udp',
+		['csp_bridge_can2udp.c'],
+		include_directories : csp_inc,
+		c_args : csp_c_args,
+		dependencies : csp_dep,
+		build_by_default : false)
+endif
 
 executable('csp_arch',
 	'csp_arch.c',
@@ -49,9 +52,12 @@ executable('zmqproxy',
 	dependencies : csp_dep,
 	build_by_default : false)
 
-executable('csp_sfp_server_client',
-	'csp_sfp_server_client.c',
-	include_directories : csp_inc,
-	c_args : csp_c_args,
-	dependencies : csp_dep,
-	build_by_default : false)
+if host_machine.system() == 'linux'
+	# Uses pthread_timedjoin_np, a glibc extension macOS doesn't have
+	executable('csp_sfp_server_client',
+		'csp_sfp_server_client.c',
+		include_directories : csp_inc,
+		c_args : csp_c_args,
+		dependencies : csp_dep,
+		build_by_default : false)
+endif

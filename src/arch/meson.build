@@ -1,4 +1,4 @@
-if host_machine.system() == 'linux'
+if host_machine.system() == 'linux' or host_machine.system() == 'darwin'
 	subdir('posix')
 	conf.set('CSP_POSIX', 1)
 elif host_machine.system() == 'freertos'

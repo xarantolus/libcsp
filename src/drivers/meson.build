@@ -9,6 +9,10 @@ endif
 
 if host_machine.system() == 'linux'
 	csp_sources += files(['eth/eth_linux.c'])
+endif
+
+if host_machine.system() == 'linux' or host_machine.system() == 'darwin'
+	# The usart driver is plain POSIX termios, which macOS supports too
 	csp_sources += files(['usart/usart_linux.c'])
 	csp_sources += files(['usart/usart_kiss.c'])
 endif
