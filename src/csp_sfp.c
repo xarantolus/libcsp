@@ -264,6 +264,10 @@ int csp_sfp_recv_fp(csp_conn_t * conn, const csp_sfp_recv_t * user, uint32_t tim
 
 	} while ((packet = csp_read(conn, timeout)) != NULL);
 
+	/* The next fragment did not arrive in time: the transfer is incomplete,
+	 * whatever the last write returned. */
+	error = CSP_ERR_TIMEDOUT;
+
 error:
 	return error;
 }
